@@ -1,5 +1,3 @@
-
-
 #include <QApplication>
 #include <QWidget>
 #include <QLineEdit>
@@ -16,26 +14,26 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QStringList>
-#include <QDialog>
 #include <QListWidget>
-#include <QDialogButtonBox>
 #include <QLabel>
 #include <QDir>
 #include <QCoreApplication>
 #include <QRegularExpression>
+#include <QStackedWidget>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonParseError>
 
 
 void showMessage(QWidget *parent, const QString &text) {
     QMessageBox::information(parent, "Информация", text);
 }
 
-
 QStringList splitPatterns(const QString &input)
 {
     QString trimmed = input.trimmed();
     if (trimmed.isEmpty())
         return {};
-
 
     QStringList raw = trimmed.split(QRegularExpression("[/,]"),
                                     Qt::SkipEmptyParts);
@@ -50,6 +48,43 @@ QStringList splitPatterns(const QString &input)
 }
 
 
+QStringList loadSearchRootsFromJson()
+{
+    QFile f("fsc_config.json");
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+
+    const QByteArray data = f.readAll();
+    f.close();
+
+    QJsonParseError err{};
+    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray())
+        return {};
+
+    QStringList roots;
+    for (const QJsonValue &v : doc.array()) {
+        if (v.isString())
+            roots << v.toString();
+    }
+    return roots;
+}
+
+
+void saveSearchRootsToJson(const QStringList &roots)
+{
+    QJsonArray arr;
+    for (const QString &r : roots)
+        arr.append(r);
+
+    QJsonDocument doc(arr);
+    QFile f("fsc_config.json");
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+
+    f.write(doc.toJson());
+    f.close();
+}
 
 void findFiles(const QString &patternText,
                const QStringList &roots,
@@ -75,7 +110,6 @@ void findFiles(const QString &patternText,
     int processedItems = 0;
     int foundItems     = 0;
 
-
     for (const QString &root : roots) {
         QDirIterator it(root,
                         QDir::Files | QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot,
@@ -99,7 +133,6 @@ void findFiles(const QString &patternText,
                 }
                 QCoreApplication::processEvents();
             }
-
 
             bool match = false;
             for (const QString &p : patterns) {
@@ -137,7 +170,7 @@ void findFiles(const QString &patternText,
     } else {
         if (statusLabel) {
             statusLabel->setText(
-                QString("  Готово. Найдено: %1 ")
+                QString("  Готово. Найдено: %1, просмотрено: %2")
                     .arg(foundItems)
                     .arg(processedItems)
                 );
@@ -167,14 +200,13 @@ int main(int argc, char *argv[])
 
     QWidget window;
     window.setWindowTitle("FSC");
-    window.resize(880, 620);
+    window.resize(900, 620);
 
     auto *mainLayout = new QHBoxLayout(&window);
 
 
     auto *leftPanel  = new QWidget(&window);
     auto *leftLayout = new QVBoxLayout(leftPanel);
-
     leftLayout->setContentsMargins(12, 12, 12, 12);
     leftLayout->setSpacing(12);
 
@@ -183,24 +215,27 @@ int main(int argc, char *argv[])
     auto *deleteButton   = new QPushButton("Удалить", leftPanel);
     auto *openButton     = new QPushButton("Перейти к файлу/папке", leftPanel);
     auto *moveButton     = new QPushButton("Переместить", leftPanel);
-    auto *settingsButton = new QPushButton("Settings", leftPanel);
-    auto *statusLabel    = new QLabel("        Ожидание скана!");
 
+    auto *collapseButton = new QPushButton("≪", leftPanel);
+    collapseButton->setFixedWidth(32);
+    collapseButton->setToolTip("Скрыть меню");
+
+    auto *settingsButton = new QPushButton("Settings", leftPanel);
+    auto *statusLabel    = new QLabel("        Ожидание скана!", leftPanel);
 
     auto *infoLabelLeft = new QLabel(leftPanel);
     infoLabelLeft->setText(
         "FSC - утилита поиска\n"
-        "файлов на пк. Она \n"
-        "реализованна на С++ и\n"
-        "позволяет максимально\n"
-        "быстро искать файлы\n"
-        "на вашем пк!\n\n\n\n"
-        "Develop by DeziX.\n"
-        "Version 0.1\n"
+        "файлов на ПК. Она\n"
+        "реализована на C++ и\n"
+        "позволяет быстро\n"
+        "искать файлы и папки.\n\n"
+        "Developed by DeziX.\n"
+        "Version 0.2"
         );
     infoLabelLeft->setWordWrap(true);
 
-    searchEdit->setPlaceholderText("Имя файлов/папки ");
+    searchEdit->setPlaceholderText("Имя файлов/папки");
 
     leftLayout->addWidget(searchEdit);
     leftLayout->addWidget(searchButton);
@@ -212,7 +247,12 @@ int main(int argc, char *argv[])
     leftLayout->addWidget(infoLabelLeft);
     leftLayout->addStretch();
     leftLayout->addWidget(statusLabel);
-    leftLayout->addWidget(settingsButton);
+
+
+    auto *bottomButtonsLayout = new QHBoxLayout();
+    bottomButtonsLayout->addWidget(collapseButton);
+    bottomButtonsLayout->addWidget(settingsButton);
+    leftLayout->addLayout(bottomButtonsLayout);
 
 
     auto *rightPanel  = new QWidget(&window);
@@ -220,7 +260,24 @@ int main(int argc, char *argv[])
     rightLayout->setContentsMargins(12, 12, 12, 12);
     rightLayout->setSpacing(8);
 
-    auto *resultsTable = new QTableWidget(rightPanel);
+
+    auto *showLeftButton = new QPushButton("Панель", rightPanel);
+    showLeftButton->setVisible(false);
+    rightLayout->addWidget(showLeftButton, 0, Qt::AlignLeft);
+
+
+    auto *backButton = new QPushButton("Back", rightPanel);
+    backButton->setVisible(false);
+    rightLayout->addWidget(backButton, 0, Qt::AlignRight);
+
+
+    auto *stack = new QStackedWidget(rightPanel);
+    rightLayout->addWidget(stack, 1);
+
+
+    auto *resultsPage   = new QWidget(rightPanel);
+    auto *resultsLayout = new QVBoxLayout(resultsPage);
+    auto *resultsTable  = new QTableWidget(resultsPage);
     resultsTable->setColumnCount(2);
     resultsTable->setHorizontalHeaderLabels({"Имя", "Путь"});
     resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -228,21 +285,42 @@ int main(int argc, char *argv[])
     resultsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     resultsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     resultsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    resultsLayout->addWidget(resultsTable);
 
-    rightLayout->addWidget(resultsTable);
 
+    auto *settingsPage   = new QWidget(rightPanel);
+    auto *settingsLayout = new QVBoxLayout(settingsPage);
+    auto *settingsLabel  = new QLabel("Корневые папки для поиска:", settingsPage);
+    auto *rootsList      = new QListWidget(settingsPage);
+    auto *settingsButtonsLayout = new QHBoxLayout();
+    auto *addRootButton    = new QPushButton("Выбор папки", settingsPage);
+    auto *removeRootButton = new QPushButton("Удалить выбранную", settingsPage);
+    settingsButtonsLayout->addWidget(addRootButton);
+    settingsButtonsLayout->addWidget(removeRootButton);
+
+    settingsLayout->addWidget(settingsLabel);
+    settingsLayout->addWidget(rootsList);
+    settingsLayout->addLayout(settingsButtonsLayout);
+
+
+    stack->addWidget(resultsPage);
+    stack->addWidget(settingsPage);
+
+    // кладём панели в основной лейаут
     mainLayout->addWidget(leftPanel, 0);
     mainLayout->addWidget(rightPanel, 1);
+    mainLayout->setStretch(0, 0);
+    mainLayout->setStretch(1, 1);
 
 
-    QStringList searchRoots;
+    QStringList searchRoots = loadSearchRootsFromJson();
+    if (searchRoots.isEmpty()) {
 #ifdef Q_OS_WIN
-
-    searchRoots << "C:/";
+        searchRoots << "C:/";
 #else
-
+        searchRoots << QDir::homePath();
 #endif
-
+    }
 
     QObject::connect(searchButton, &QPushButton::clicked, [&]() {
         const QString pattern = searchEdit->text();
@@ -303,7 +381,7 @@ int main(int argc, char *argv[])
         QDesktopServices::openUrl(QUrl::fromLocalFile(openPath));
     });
 
-    // Кнопка Переместить (и файлы, и папки)
+
     QObject::connect(moveButton, &QPushButton::clicked, [&]() {
         const QStringList paths = selectedFilePaths(resultsTable);
         if (paths.isEmpty()) {
@@ -340,54 +418,60 @@ int main(int argc, char *argv[])
 
 
     QObject::connect(settingsButton, &QPushButton::clicked, [&]() {
-        QDialog dialog(&window);
-        dialog.setWindowTitle("Настройки поиска");
-
-        auto *layout = new QVBoxLayout(&dialog);
-        auto *label  = new QLabel("Корневые папки для поиска:", &dialog);
-        auto *listWidget = new QListWidget(&dialog);
-
-        layout->addWidget(label);
-        layout->addWidget(listWidget);
-
+        rootsList->clear();
         for (const QString &root : searchRoots)
-            listWidget->addItem(root);
+            rootsList->addItem(root);
 
-        auto *buttonsLayout = new QHBoxLayout();
-        auto *addButton    = new QPushButton("Выбор папки", &dialog);
-        auto *removeButton = new QPushButton("Удалить выбранную", &dialog);
-        buttonsLayout->addWidget(addButton);
-        buttonsLayout->addWidget(removeButton);
-        layout->addLayout(buttonsLayout);
+        stack->setCurrentWidget(settingsPage);
+        backButton->setVisible(true);
+    });
 
-        auto *buttonBox = new QDialogButtonBox(
-            QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-            Qt::Horizontal,
-            &dialog);
-        layout->addWidget(buttonBox);
 
-        QObject::connect(addButton, &QPushButton::clicked, [&]() {
-            const QString dirPath = QFileDialog::getExistingDirectory(&dialog, "Выберите папку");
-            if (!dirPath.isEmpty())
-                listWidget->addItem(dirPath);
-        });
+    QObject::connect(backButton, &QPushButton::clicked, [&]() {
+        QStringList newRoots;
+        for (int i = 0; i < rootsList->count(); ++i)
+            newRoots << rootsList->item(i)->text();
 
-        QObject::connect(removeButton, &QPushButton::clicked, [&]() {
-            if (auto *item = listWidget->currentItem())
-                delete item;
-        });
-
-        QObject::connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        QObject::connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-        if (dialog.exec() == QDialog::Accepted) {
-            searchRoots.clear();
-            for (int i = 0; i < listWidget->count(); ++i)
-                searchRoots << listWidget->item(i)->text();
+        if (newRoots.isEmpty()) {
+#ifdef Q_OS_WIN
+            newRoots << "C:/";
+#else
+            newRoots << QDir::homePath();
+#endif
         }
+
+        searchRoots = newRoots;
+        saveSearchRootsToJson(searchRoots);
+
+        stack->setCurrentWidget(resultsPage);
+        backButton->setVisible(false);
+    });
+
+
+    QObject::connect(addRootButton, &QPushButton::clicked, [&]() {
+        const QString dirPath = QFileDialog::getExistingDirectory(&window, "Выберите папку");
+        if (!dirPath.isEmpty())
+            rootsList->addItem(dirPath);
+    });
+
+
+    QObject::connect(removeRootButton, &QPushButton::clicked, [&]() {
+        if (auto *item = rootsList->currentItem())
+            delete item;
+    });
+
+
+    QObject::connect(collapseButton, &QPushButton::clicked, [&]() {
+        leftPanel->setVisible(false);
+        showLeftButton->setVisible(true);
+    });
+
+
+    QObject::connect(showLeftButton, &QPushButton::clicked, [&]() {
+        leftPanel->setVisible(true);
+        showLeftButton->setVisible(false);
     });
 
     window.show();
     return app.exec();
 }
-
