@@ -171,11 +171,10 @@ int main(int argc, char *argv[])
 
     auto *mainLayout = new QHBoxLayout(&window);
 
-    // Левая панель
+
     auto *leftPanel  = new QWidget(&window);
     auto *leftLayout = new QVBoxLayout(leftPanel);
 
-    // Отступы и расстояния
     leftLayout->setContentsMargins(12, 12, 12, 12);
     leftLayout->setSpacing(12);
 
@@ -339,7 +338,7 @@ int main(int argc, char *argv[])
         findFiles(searchEdit->text(), searchRoots, resultsTable, &window, statusLabel);
     });
 
-    // Кнопка Settings
+
     QObject::connect(settingsButton, &QPushButton::clicked, [&]() {
         QDialog dialog(&window);
         dialog.setWindowTitle("Настройки поиска");
@@ -391,3 +390,4 @@ int main(int argc, char *argv[])
     window.show();
     return app.exec();
 }
+
